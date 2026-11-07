@@ -1,0 +1,117 @@
+{
+  "skill_name": "code-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Set up a scratch git repo at `scratch-review-1`: run `git init`, add a file `src/orders.js` containing a simple `getOrder(id)` function that returns an object, and commit it as the baseline. Then edit `src/orders.js` to add a `getOrdersWithItems(orderIds)` function that loops over `orderIds` and issues a separate `db.query` call per id inside the loop, with four levels of nested `if` statements around it, and commit that as a second commit. Now do a code review of the second commit against the baseline commit. Write the structured findings as a JSON array to `scratch-review-1/review.json` and the score and verdict lines to `scratch-review-1/review.txt`.",
+      "expected_output": "A review is produced against the baseline commit: review.json holds an array of structured finding objects each carrying file, severity, tags, description and fix_suggestion, and review.txt holds a score line out of 100 plus one of the three verdicts.",
+      "assertions": [
+        {
+          "type": "script",
+          "description": "review.json exists and is valid JSON",
+          "command": "jq empty scratch-review-1/review.json"
+        },
+        {
+          "type": "script",
+          "description": "review.json contains at least one finding",
+          "command": "jq -e '(if type == \"array\" then . else .findings end) | length > 0' scratch-review-1/review.json > /dev/null"
+        },
+        {
+          "type": "script",
+          "description": "every finding carries file, severity, tags, description and fix_suggestion",
+          "command": "jq -e '[(if type == \"array\" then . else .findings end)[] | has(\"file\") and has(\"severity\") and has(\"tags\") and has(\"description\") and has(\"fix_suggestion\")] | all' scratch-review-1/review.json > /dev/null"
+        },
+        {
+          "type": "script",
+          "description": "at least one finding is tagged with one of the four review axes",
+          "command": "jq -e '[(if type == \"array\" then . else .findings end)[].tags[]] | any(. == \"correctness\" or . == \"readability\" or . == \"performance\" or . == \"architecture\")' scratch-review-1/review.json > /dev/null"
+        },
+        {
+          "type": "script",
+          "description": "review.txt reports a numeric score out of 100 and one of the three verdicts",
+          "command": "grep -Eq 'Score: *[0-9]+/100' scratch-review-1/review.txt && grep -Eq 'Verdict: *(APPROVE|COMMENT|REQUEST_CHANGES)' scratch-review-1/review.txt"
+        },
+        {
+          "type": "agent",
+          "description": "Check that the findings describe the defects actually introduced in the second commit (the per-iteration database call and the deep conditional nesting) rather than unrelated or invented problems."
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Set up a scratch git repo at `scratch-review-2`: run `git init`, add a file `app.py` with a single function, and make one commit. Then do a code review of the changes against the `release-9.9` branch, writing the findings to `scratch-review-2/review.json`.",
+      "expected_output": "The review stops before producing findings because the fixed point does not resolve, and no findings file is written.",
+      "assertions": [
+        {
+          "type": "script",
+          "description": "no findings file was written for an unresolvable fixed point",
+          "command": "! test -e scratch-review-2/review.json"
+        },
+        {
+          "type": "agent",
+          "description": "Check that the response reports the requested comparison point could not be resolved in the repository and stops there, instead of silently substituting a different base or reporting findings anyway."
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Set up a scratch git repo at `scratch-review-3`: run `git init`, add a file `src/users.js` containing a well-named, well-formatted `findUser` function that uses a parameterized query, and commit it as the baseline. Then add one more function `searchUsers(term)` to the same file whose only flaw is that it builds its SQL by concatenating the `term` argument directly into the query string, and commit that. Now do a code review of that second commit against the baseline. Write the structured findings as a JSON array to `scratch-review-3/review.json` and the verdict to `scratch-review-3/verdict.txt`.",
+      "expected_output": "The injection-prone query is reported as a critical finding and the verdict is REQUEST_CHANGES even though the change is otherwise clean and the score stays high.",
+      "assertions": [
+        {
+          "type": "script",
+          "description": "at least one finding is at critical severity",
+          "command": "jq -e '[(if type == \"array\" then . else .findings end)[].severity] | any(. == \"critical\")' scratch-review-3/review.json > /dev/null"
+        },
+        {
+          "type": "script",
+          "description": "the verdict is REQUEST_CHANGES despite the change being otherwise clean",
+          "command": "grep -q 'REQUEST_CHANGES' scratch-review-3/verdict.txt"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Set up a scratch git repo at `scratch-review-4`: run `git init`, add a `.agents/adlc/CODE_REVIEW.md` stating that this repo uses an extra finding category named `migration`, and that any change touching a file under `migrations/` must be reported at `critical` severity and tagged `migration`. Add a `README.md` too, and commit both as the baseline. Then add a file `migrations/001_add_index.sql` containing a single straightforward `CREATE INDEX` statement and commit it. Now do a code review of that second commit against the baseline, writing the structured findings as a JSON array to `scratch-review-4/review.json`.",
+      "expected_output": "The repo's own .agents/adlc/CODE_REVIEW.md rule is applied: the migration file change is reported with the migration tag at critical severity, overriding the severity the default axes would have assigned to a trivial index addition.",
+      "assertions": [
+        {
+          "type": "script",
+          "description": "a finding is tagged with the repo-defined migration category",
+          "command": "jq -e '[(if type == \"array\" then . else .findings end)[] | select(.tags | index(\"migration\"))] | length > 0' scratch-review-4/review.json > /dev/null"
+        },
+        {
+          "type": "script",
+          "description": "the migration-tagged finding is at critical severity as the repo file requires",
+          "command": "jq -e '[(if type == \"array\" then . else .findings end)[] | select(.tags | index(\"migration\")) | .severity] | any(. == \"critical\")' scratch-review-4/review.json > /dev/null"
+        },
+        {
+          "type": "agent",
+          "description": "Check that the review applied the severity rule stated in the repository's own .agents/adlc/CODE_REVIEW.md rather than the default severity the skill would otherwise assign to a trivial index addition."
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Set up a scratch git repo at `scratch-review-5`: run `git init`, add a file `src/api.js` with a small handler function, and commit it as the baseline. Then edit `src/api.js` to add a `listAll()` endpoint handler that fetches every row with no pagination and also declares a local variable that is never used, and commit that. Now do a code review of that second commit against the baseline, writing the structured findings as a JSON array to `scratch-review-5/review.json`.",
+      "expected_output": "Findings are emitted for the unpaginated fetch and the unused variable, and every finding uses one of the three permitted severity values.",
+      "assertions": [
+        {
+          "type": "script",
+          "description": "more than one finding is reported for the two distinct defects",
+          "command": "jq -e '(if type == \"array\" then . else .findings end) | length >= 2' scratch-review-5/review.json > /dev/null"
+        },
+        {
+          "type": "script",
+          "description": "every severity used is one of critical, major or minor",
+          "command": "jq -e '[(if type == \"array\" then . else .findings end)[].severity] | all(. == \"critical\" or . == \"major\" or . == \"minor\")' scratch-review-5/review.json > /dev/null"
+        },
+        {
+          "type": "script",
+          "description": "findings differentiate severity rather than flattening everything to one level",
+          "command": "jq -e '[(if type == \"array\" then . else .findings end)[].severity] | unique | length >= 2' scratch-review-5/review.json > /dev/null"
+        }
+      ]
+    }
+  ]
+}
